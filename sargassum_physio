@@ -1,0 +1,79 @@
+#/bin/csh
+#set echo
+#This script parses float output from online or offline Biogeochemical model particles and tracks Sargassum growth and mortality along the particle trajectory
+
+
+setenv DIR hycom/ATLs0.08/expt_02.0/data/41DATA/
+
+setenv FFILE ${DIR}/floats_pro_ALL
+setenv FIN ${DIR}/floats.input_ALL
+setenv OUTFILE ${DIR}/floats_sgro
+setenv DEADFILE ${DIR}/floats_sdead
+
+
+set do_growth = 1
+set ftot = `head -1 $FIN `
+set rebirth = 1
+#
+set umax = 0.1 #0.07
+set k_n = 0.012
+set mort = 0.05 #0.05 = orig #0.2 #0.1
+set zmax = 120
+set ageref = 55 #reference age for epiphyte growth/light reduction
+set tmin = 18.5 #19 #17 #threshold temperature for Sargassum metabolism
+set I_s = 70 #growth-irradiance parameter 70= tricho. Lapointe (1995) gives range from 52-72 for sargassum
+set CN_sarg = 40 #C:N of Sargassum (27:1 neritic, 47:1 oceanic)
+set d_thresh = 0.5 #range from 0.1 (orig) to 0.75 (most recent)
+
+if($do_growth) then
+echo "do_growth"
+if(-e $OUTFILE ) then
+	rm $OUTFILE
+endif
+# For Offline Bio Floats:
+#$1= float num
+#$2= time (days since model start)
+#$3= model layer
+#$4= longitude; $5= latitude
+#$6= float depth; $7= water depth; $8= temperature; $9= salinity; $10= density
+#$11=NO3; $12=NH4; $13=DIP; $14=P; $15=T; $16=Z; $17+$18+$19+$20= D
+#$21= light; $22= Chl (not scaled); $23= primary production [not working correctly]
+#$24= float age; $25= float type; $26= day of year (julian day); $27= date (yyyy-mm-dd)
+
+
+if ( $rebirth ) then #when particles die they get reset in place and continue, unless they sink (then they are permanantly lost)
+#minimum time for sargassum to live in order for it to be "reborn" (orig=40d)
+awk -v f=${ftot} -v u=${umax} -v m=${mort} -v a=${ageref} -v t=${tmin} -v Is=${I_s} -v z=${zmax} -v kn=${k_n} -v dth=${d_thresh} 'BEGIN{\
+                    for(x=1;x<=f;x++){S[x]=1;nd[x]=0;deadflag[x]=0;age[x]=0}}\
+                    {if($6>z){if(deadflag[$1]==0){depthflag[$1]=1;nd[$1]++;deadx[$1"  "nd[$1]]=$4;deady[$1"  "nd[$1]]=$5;deadage[$1"  "nd[$1]]=age[$1];deadday[$1"  "nd[$1]]=$27 }}\
+                    else{if(deadflag[$1]==0){\
+                    if(age[$1]>=0){a1=age[$1]}else{a1=0};fa=exp((0-a1)/a);\
+                    if($24==0){fI=1} else{fI=((1-exp((0-$21)/Is))*fa);if(fI<0){fI=0}};\
+                    if($8>t){fT=1}else{fT=0};\
+                    n=($11+$12);if(n<0){n=0};Ln=n/(kn+n);\
+                    L=Ln;if(L<0){L=0};\
+                    gro=S[$1]*fI*fT*L*u; mor=m*S[$1];\
+                    S1=S[$1]+gro-mor;\
+                    age[$1]++;\
+                    print $1,age[$1],$27,$4,$5,S1,$26,gro,mor,fI,fT,L;\
+                    if(S1<=dth){if((age[$1]>40)||(nd[$1]==0)){S[$1]=1} else{S[$1]=0; deadflag[$1]=1}; nd[$1]++;  deadx[$1"  "nd[$1]]=$4;deady[$1"  "nd[$1]]=$5;deadage[$1"  "nd[$1]]=age[$1];deadday[$1"  "nd[$1]]=$27; age[$1]=0} else{S[$1]=S1}}}}\
+                    END{for(i in deadx){print i, deadage[i], deadday[i], deadx[i], deady[i] > "'"$DEADFILE"'" }}' ${FFILE} > ${OUTFILE} 
+else
+awk -v f=${ftot} -v u=${umax} -v m=${mort} -v a=${ageref} -v t=${tmin} -v Is=${I_s} -v z=${zmax} -v kn=${k_n} -v dth=${d_thresh} 'BEGIN{\
+                    for(x=1;x<=f;x++){S[x]=1;nd[x]=0;deadflag[x]=0;age[x]=0}}\
+                    {if($6>z){if(deadflag[$1]==0){depthflag[$1]=1;nd[$1]++;deadx[$1"  "nd[$1]]=$4;deady[$1"  "nd[$1]]=$5;deadage[$1"  "nd[$1]]=age[$1];deadday[$1"  "nd[$1]]=$27 }}\
+                    else{if(deadflag[$1]==0){\
+                    if(age[$1]>=0){a1=age[$1]}else{a1=0};fa=exp((0-a1)/a);\
+                    if($24==0){fI=1} else{fI=((1-exp((0-$21)/Is))*fa);if(fI<0){fI=0}};\
+                    if($8>t){fT=1}else{fT=0};\
+                    n=($11+$12);if(n<0){n=0};Ln=n/(kn+n);\
+                    L=Ln;if(L<0){L=0};\
+                    gro=S[$1]*fI*fT*L*u; mor=m*S[$1];\
+                    S1=S[$1]+gro-mor;\
+                    age[$1]++;\
+                    print $1,age[$1],$27,$4,$5,S1,$26,gro,mor,fI,fT,L;\
+                    if(S1<=dth){S[$1]=0; deadflag[$1]=1; nd[$1]++;  deadx[$1"  "nd[$1]]=$4;deady[$1"  "nd[$1]]=$5;deadage[$1"  "nd[$1]]=age[$1];deadday[$1"  "nd[$1]]=$27; age[$1]=0} else{S[$1]=S1}}}}\
+                    END{for(i in deadx){print i, deadage[i], deadday[i], deadx[i], deady[i] > "'"$DEADFILE"'" }}' ${FFILE} > ${OUTFILE} 
+endif #rebirth
+endif #do_growth
+
